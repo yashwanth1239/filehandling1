@@ -6,34 +6,40 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 @Service
 public class AttachmentServiceImpl implements AttachmentService {
 
-    private AttachmentRepository attachmentRepository;
+    private final AttachmentRepository attachmentRepository;
 
     public AttachmentServiceImpl(AttachmentRepository attachmentRepository) {
         this.attachmentRepository = attachmentRepository;
     }
 
     @Override
-    public Attachment saveAttachment(MultipartFile file) throws Exception {
-        String fileName = StringUtils.cleanPath(file.getOriginalFilename());
-        try {
+    public Attachment saveAttachments(List<MultipartFile> files) throws Exception {
+        String parentId = generateUniqueId();
+        Attachment parentAttachment = new Attachment(parentId, "parent", null, null, null);
+        List<Attachment> children = new ArrayList<>();
+
+        for (MultipartFile file : files) {
+            String fileName = StringUtils.cleanPath(file.getOriginalFilename());
             if (fileName.contains("..")) {
                 throw new Exception("Filename contains invalid path sequence " + fileName);
             }
-
-            // Generate a unique 4-digit random number
-            String randomId = generateUniqueId();
-
-            Attachment attachment = new Attachment(randomId, fileName, file.getContentType(), file.getBytes());
-            return attachmentRepository.save(attachment);
-
-        } catch (Exception e) {
-            throw new Exception("Could not save File: " + fileName, e);
+            Attachment childAttachment = new Attachment(generateUniqueId(), fileName, file.getContentType(), file.getBytes(), parentAttachment);
+            children.add(childAttachment);
         }
+        parentAttachment.setChildren(children);
+        return attachmentRepository.save(parentAttachment);
+    }
+
+    @Override
+    public List<Attachment> getAttachmentsByParentId(String parentId) throws Exception {
+        return attachmentRepository.findByParentId(parentId);
     }
 
     @Override
@@ -42,12 +48,13 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .orElseThrow(() -> new Exception("File not found with Id: " + fileId));
     }
 
+
     private String generateUniqueId() {
         Random random = new Random();
         String id;
         do {
-            id = String.format("%04d", random.nextInt(10000)); // Generate a random 4-digit number
-        } while (attachmentRepository.existsById(id)); // Ensure the ID is unique
+            id = String.format("%04d", random.nextInt(10000));
+        } while (attachmentRepository.existsById(id));
         return id;
     }
 }

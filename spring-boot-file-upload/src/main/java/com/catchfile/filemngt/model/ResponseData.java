@@ -2,50 +2,27 @@ package com.catchfile.filemngt.model;
 
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class ResponseData {
 
-    private String fileName;
+    private List<String> fileNames;
     private String downloadURL;
-    private String fileType;
-    private long fileSize;
 
-    public ResponseData(String fileName, String downloadURL, String fileType, long fileSize) {
-        this.fileName = fileName;
+    public ResponseData(List<String> fileNames, String downloadURL) {
+        this.fileNames = fileNames;
         this.downloadURL = downloadURL;
-        this.fileType = fileType;
-        this.fileSize = fileSize;
     }
 
-    public String getFileName() {
-        return fileName;
+    public List<String> getFileNames() {
+        return fileNames;
     }
 
     public String getDownloadURL() {
         return downloadURL;
     }
+    public ResponseData() {} // Add this
 
-    public String getFileType() {
-        return fileType;
-    }
 
-    public long getFileSize() {
-        return fileSize;
-    }
-
-    public void setFileName(String fileName) {
-        this.fileName = fileName;
-    }
-
-    public void setDownloadURL(String downloadURL) {
-        this.downloadURL = downloadURL;
-    }
-
-    public void setFileType(String fileType) {
-        this.fileType = fileType;
-    }
-
-    public void setFileSize(long fileSize) {
-        this.fileSize = fileSize;
-    }
 }
