@@ -16,10 +16,9 @@ public class ZipFileDownloadUtil {
 
     public static ResponseEntity<?> createZipFile(List<Attachment> attachments, String parentId) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        try (ZipOutputStream zipOutputStream = new ZipOutputStream(byteArrayOutputStream)) { // Try-with-resources for auto-closing
-
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(byteArrayOutputStream)) {
             for (Attachment attachment : attachments) {
-                if(attachment.getData() != null) { //check if attachment data is null to avoid null pointer exception
+                if (attachment.getData() != null) {
                     ZipEntry zipEntry = new ZipEntry(attachment.getFileName());
                     zipEntry.setSize(attachment.getData().length);
                     zipOutputStream.putNextEntry(zipEntry);
@@ -27,7 +26,7 @@ public class ZipFileDownloadUtil {
                     zipOutputStream.closeEntry();
                 }
             }
-        } // zipOutputStream is automatically closed here
+        }
 
         ByteArrayResource resource = new ByteArrayResource(byteArrayOutputStream.toByteArray());
 

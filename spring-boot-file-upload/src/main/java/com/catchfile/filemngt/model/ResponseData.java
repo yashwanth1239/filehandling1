@@ -1,28 +1,72 @@
 package com.catchfile.filemngt.model;
 
 import lombok.Data;
-
 import java.util.List;
 
 @Data
 public class ResponseData {
+    private List<FileResponse> files;
+    private String parentId;
 
-    private List<String> fileNames;
-    private String downloadURL;
+    @Data
+    public static class FileResponse {
+        private String fileName;
+        private String downloadURL;
+        private String parentId;
 
-    public ResponseData(List<String> fileNames, String downloadURL) {
-        this.fileNames = fileNames;
-        this.downloadURL = downloadURL;
+        public FileResponse(String fileName, String downloadURL, String parentId) {
+            this.fileName = fileName;
+            this.downloadURL = downloadURL;
+            this.parentId = parentId;
+        }
+
+        // Getters and Setters
+        public String getFileName() {
+            return fileName;
+        }
+
+        public void setFileName(String fileName) {
+            this.fileName = fileName;
+        }
+
+        public String getDownloadURL() {
+            return downloadURL;
+        }
+
+        public void setDownloadURL(String downloadURL) {
+            this.downloadURL = downloadURL;
+        }
+
+        public String getParentId() {
+            return parentId;
+        }
+
+        public void setParentId(String parentId) {
+            this.parentId = parentId;
+        }
     }
 
-    public List<String> getFileNames() {
-        return fileNames;
+    public ResponseData(List<FileResponse> files, String parentId) {
+        this.files = files;
+        this.parentId = parentId;
     }
 
-    public String getDownloadURL() {
-        return downloadURL;
+    public ResponseData() {}
+
+    // Getters and Setters
+    public List<FileResponse> getFiles() {
+        return files;
     }
-    public ResponseData() {} // Add this
 
+    public void setFiles(List<FileResponse> files) {
+        this.files = files;
+    }
 
+    public String getParentId() {
+        return parentId;
+    }
+
+    public void setParentId(String parentId) {
+        this.parentId = parentId;
+    }
 }

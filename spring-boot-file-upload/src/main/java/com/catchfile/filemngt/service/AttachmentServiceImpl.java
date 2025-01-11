@@ -5,7 +5,7 @@ import com.catchfile.filemngt.repository.AttachmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
-
+import jakarta.transaction.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -30,7 +30,14 @@ public class AttachmentServiceImpl implements AttachmentService {
             if (fileName.contains("..")) {
                 throw new Exception("Filename contains invalid path sequence " + fileName);
             }
-            Attachment childAttachment = new Attachment(generateUniqueId(), fileName, file.getContentType(), file.getBytes(), parentAttachment);
+            String childId = parentId + "_" + children.size();
+            Attachment childAttachment = new Attachment(
+                    childId,
+                    fileName,
+                    file.getContentType(),
+                    file.getBytes(),
+                    parentAttachment
+            );
             children.add(childAttachment);
         }
         parentAttachment.setChildren(children);
@@ -48,6 +55,20 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .orElseThrow(() -> new Exception("File not found with Id: " + fileId));
     }
 
+    @Override
+    @Transactional
+    public void deleteAttachment(String fileId) throws Exception {
+        Attachment attachment = getAttachment(fileId);
+
+        if (attachment.getParent() != null) {
+            attachment.getParent().getChildren().remove(attachment);
+            if (attachment.getParent().getChildren().isEmpty()) {
+                attachmentRepository.delete(attachment.getParent());
+            } else {
+                attachmentRepository.save(attachment.getParent());
+            }
+        }
+    }
 
     private String generateUniqueId() {
         Random random = new Random();
