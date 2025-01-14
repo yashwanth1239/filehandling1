@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
-@CrossOrigin(origins = "*", methods = { RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE, RequestMethod.PUT })
+
 public class AttachmentController {
 
     private static final Logger logger = LoggerFactory.getLogger(AttachmentController.class);
@@ -40,7 +40,7 @@ public class AttachmentController {
             List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
                     .map(child -> {
                         String downloadURL = "/download/" + child.getId();
-                        String deleteURL = "/delete/" + child.getId(); // Adding deletion URL
+                        String deleteURL = "/delete/" + child.getId();
                         return new ResponseData.FileResponse(child.getFileName(), downloadURL, deleteURL, parentAttachment.getId());
                     })
                     .collect(Collectors.toList());
@@ -51,6 +51,35 @@ public class AttachmentController {
             return new ResponseEntity<>(responseData, HttpStatus.CREATED);
         } catch (Exception e) {
             logger.error("Exception during file upload", e);
+            return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @PostMapping(value = "/upload/{parent_id}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ResponseData> uploadFilesToParent(
+            @PathVariable("parent_id") String parentId,
+            @RequestParam("files") List<MultipartFile> files) {
+        try {
+            if (files == null || files.isEmpty()) {
+                return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+            }
+
+            Attachment parentAttachment = attachmentService.addAttachmentsToParent(parentId, files);
+
+            List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
+                    .map(child -> {
+                        String downloadURL = "/download/" + child.getId();
+                        String deleteURL = "/delete/" + child.getId();
+                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, deleteURL, parentAttachment.getId());
+                    })
+                    .collect(Collectors.toList());
+
+            String bulkDownloadURL = "/download/bulk/" + parentAttachment.getId();
+
+            ResponseData responseData = new ResponseData(fileResponses, parentAttachment.getId(), bulkDownloadURL);
+            return new ResponseEntity<>(responseData, HttpStatus.CREATED);
+        } catch (Exception e) {
+            logger.error("Exception during file upload to parent", e);
             return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }

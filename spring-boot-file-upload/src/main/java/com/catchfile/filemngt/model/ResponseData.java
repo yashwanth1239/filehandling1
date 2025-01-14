@@ -48,7 +48,7 @@ public class ResponseData {
         public FileResponse(String fileName, String downloadURL, String deleteURL, String parentId) {
             this.fileName = fileName;
             this.downloadURL = downloadURL;
-            this.deleteURL = deleteURL; // New field for deletion URL
+            this.deleteURL = deleteURL;
             this.parentId = parentId;
         }
 

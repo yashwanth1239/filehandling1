@@ -47,6 +47,37 @@ public class AttachmentServiceImpl implements AttachmentService {
     }
 
     @Override
+    @Transactional
+    public Attachment addAttachmentsToParent(String parentId, List<MultipartFile> files) throws Exception {
+        Attachment parentAttachment = attachmentRepository.findById(parentId)
+                .orElseThrow(() -> new Exception("Parent not found with Id: " + parentId));
+
+        List<Attachment> existingChildren = parentAttachment.getChildren();
+        int startIndex = existingChildren.size();
+
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile file = files.get(i);
+            String fileName = StringUtils.cleanPath(file.getOriginalFilename());
+            if (fileName.contains("..")) {
+                throw new Exception("Filename contains invalid path sequence " + fileName);
+            }
+
+            String childId = parentId + "_" + (startIndex + i);
+            Attachment childAttachment = new Attachment(
+                    childId,
+                    fileName,
+                    file.getContentType(),
+                    file.getBytes(),
+                    parentAttachment
+            );
+            existingChildren.add(childAttachment);
+        }
+
+        parentAttachment.setChildren(existingChildren);
+        return attachmentRepository.save(parentAttachment);
+    }
+
+    @Override
     public List<Attachment> getAttachmentsByParentId(String parentId) throws Exception {
         return attachmentRepository.findByParentId(parentId);
     }
