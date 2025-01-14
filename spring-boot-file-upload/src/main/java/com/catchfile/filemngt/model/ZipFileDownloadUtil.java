@@ -18,22 +18,17 @@ public class ZipFileDownloadUtil {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(byteArrayOutputStream)) {
             for (Attachment attachment : attachments) {
-                if (attachment.getData() != null) {
-                    ZipEntry zipEntry = new ZipEntry(attachment.getFileName());
-                    zipEntry.setSize(attachment.getData().length);
-                    zipOutputStream.putNextEntry(zipEntry);
-                    zipOutputStream.write(attachment.getData());
-                    zipOutputStream.closeEntry();
-                }
+                ZipEntry entry = new ZipEntry(attachment.getFileName());
+                entry.setSize(attachment.getData().length);
+                zipOutputStream.putNextEntry(entry);
+                zipOutputStream.write(attachment.getData());
+                zipOutputStream.closeEntry();
             }
         }
-
         ByteArrayResource resource = new ByteArrayResource(byteArrayOutputStream.toByteArray());
-
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .contentLength(resource.contentLength())
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"files_" + parentId + ".zip\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + parentId + ".zip\"")
                 .body(resource);
     }
 }

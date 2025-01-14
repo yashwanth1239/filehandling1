@@ -5,9 +5,11 @@ import com.catchfile.filemngt.repository.AttachmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+
 import jakarta.transaction.Transactional;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 @Service
@@ -58,15 +60,24 @@ public class AttachmentServiceImpl implements AttachmentService {
     @Override
     @Transactional
     public void deleteAttachment(String fileId) throws Exception {
-        Attachment attachment = getAttachment(fileId);
-
-        if (attachment.getParent() != null) {
-            attachment.getParent().getChildren().remove(attachment);
-            if (attachment.getParent().getChildren().isEmpty()) {
-                attachmentRepository.delete(attachment.getParent());
-            } else {
-                attachmentRepository.save(attachment.getParent());
+        Optional<Attachment> attachmentOptional = attachmentRepository.findById(fileId);
+        if (attachmentOptional.isPresent()) {
+            Attachment attachment = attachmentOptional.get();
+            if (attachment.getParent() != null) {
+                List<Attachment> children = attachment.getChildren();
+                if (!children.isEmpty()) {
+                    Attachment newParent = children.get(0);
+                    newParent.setParent(null);
+                    newParent.setId(attachment.getId());
+                    children.remove(0);
+                    for (int i = 0; i < children.size(); i++) {
+                        children.get(i).setId(attachment.getId() + "_" + i);
+                    }
+                    newParent.setChildren(children);
+                    attachmentRepository.save(newParent);
+                }
             }
+            attachmentRepository.delete(attachment);
         }
     }
 

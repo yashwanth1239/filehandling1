@@ -2,6 +2,7 @@ package com.catchfile.filemngt.controller;
 
 import com.catchfile.filemngt.entity.Attachment;
 import com.catchfile.filemngt.model.ResponseData;
+import com.catchfile.filemngt.model.ZipFileDownloadUtil;
 import com.catchfile.filemngt.service.AttachmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,14 +13,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@CrossOrigin(origins = "*", methods = { RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE, RequestMethod.PUT })
 public class AttachmentController {
 
     private static final Logger logger = LoggerFactory.getLogger(AttachmentController.class);
@@ -39,19 +39,16 @@ public class AttachmentController {
 
             List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
                     .map(child -> {
-                        String downloadURL = ServletUriComponentsBuilder.fromCurrentContextPath()
-                                .path("/download/")
-                                .path(child.getId())
-                                .toUriString();
-                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, parentAttachment.getId());
+                        String downloadURL = "/download/" + child.getId();
+                        String deleteURL = "/delete/" + child.getId(); // Adding deletion URL
+                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, deleteURL, parentAttachment.getId());
                     })
                     .collect(Collectors.toList());
 
-            ResponseData responseData = new ResponseData(fileResponses, parentAttachment.getId());
+            String bulkDownloadURL = "/download/bulk/" + parentAttachment.getId();
+
+            ResponseData responseData = new ResponseData(fileResponses, parentAttachment.getId(), bulkDownloadURL);
             return new ResponseEntity<>(responseData, HttpStatus.CREATED);
-        } catch (MultipartException e) {
-            logger.error("Multipart Exception during file upload", e);
-            return new ResponseEntity<>(HttpStatus.PAYLOAD_TOO_LARGE);
         } catch (Exception e) {
             logger.error("Exception during file upload", e);
             return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
@@ -73,37 +70,23 @@ public class AttachmentController {
         }
     }
 
-    @GetMapping("/files/{parentId}")
-    public ResponseEntity<ResponseData> getFilesByParentId(@PathVariable String parentId) {
+    @GetMapping("/download/bulk/{parentId}")
+    public ResponseEntity<?> downloadBulkFiles(@PathVariable String parentId) {
         try {
             List<Attachment> attachments = attachmentService.getAttachmentsByParentId(parentId);
-            if (attachments.isEmpty()) {
-                return ResponseEntity.notFound().build();
-            }
-
-            List<ResponseData.FileResponse> fileResponses = attachments.stream()
-                    .map(child -> {
-                        String downloadURL = ServletUriComponentsBuilder.fromCurrentContextPath()
-                                .path("/download/")
-                                .path(child.getId())
-                                .toUriString();
-                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, parentId);
-                    })
-                    .collect(Collectors.toList());
-
-            ResponseData responseData = new ResponseData(fileResponses, parentId);
-            return ResponseEntity.ok(responseData);
+            return ZipFileDownloadUtil.createZipFile(attachments, parentId);
         } catch (Exception e) {
-            logger.error("Error retrieving files", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            logger.error("Error downloading bulk files", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error downloading files: " + e.getMessage());
         }
     }
 
-    @DeleteMapping("/file/{fileId}")
+    @DeleteMapping("/delete/{fileId}")
     public ResponseEntity<?> deleteFile(@PathVariable String fileId) {
         try {
             attachmentService.deleteAttachment(fileId);
-            return ResponseEntity.ok().build();
+            return ResponseEntity.ok("File and its dependencies have been deleted/updated.");
         } catch (Exception e) {
             logger.error("Error deleting file", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -119,8 +102,7 @@ public class AttachmentController {
         try {
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(fileType))
-                    .header(HttpHeaders.CONTENT_DISPOSITION,
-                            "attachment; filename=\"" + attachment.getFileName() + "\"")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + attachment.getFileName() + "\"")
                     .body(new ByteArrayResource(attachment.getData()));
         } catch (Exception e) {
             logger.error("Error creating byte array resource", e);
