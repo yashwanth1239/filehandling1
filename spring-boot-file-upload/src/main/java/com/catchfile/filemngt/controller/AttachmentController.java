@@ -14,12 +14,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
-
 public class AttachmentController {
 
     private static final Logger logger = LoggerFactory.getLogger(AttachmentController.class);
@@ -122,6 +122,33 @@ public class AttachmentController {
                     .body("Error deleting file: " + e.getMessage());
         }
     }
+
+    @GetMapping("/files/{parentId}")
+    public ResponseEntity<ResponseData> getFilesByParentId(@PathVariable String parentId) {
+        try {
+            List<Attachment> attachments = attachmentService.getAttachmentsByParentId(parentId);
+            if (attachments.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            List<ResponseData.FileResponse> fileResponses = attachments.stream()
+                    .map(child -> {
+                        String downloadURL = ServletUriComponentsBuilder.fromCurrentContextPath()
+                                .path("/download/")
+                                .path(child.getId())
+                                .toUriString();
+                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, "", parentId);
+                    })
+                    .collect(Collectors.toList());
+            ResponseData responseData = new ResponseData(fileResponses, parentId, "");
+            return ResponseEntity.ok(responseData);
+        } catch (Exception e) {
+            logger.error("Error retrieving files", e);
+            ResponseData errorResponse = new ResponseData(null, parentId, "");
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
 
     private ResponseEntity<Resource> getSingleFileResponse(Attachment attachment) {
         String fileType = attachment.getFileType();
