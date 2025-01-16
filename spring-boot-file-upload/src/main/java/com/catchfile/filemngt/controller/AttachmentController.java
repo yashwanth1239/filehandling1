@@ -2,7 +2,6 @@ package com.catchfile.filemngt.controller;
 
 import com.catchfile.filemngt.entity.Attachment;
 import com.catchfile.filemngt.model.ResponseData;
-import com.catchfile.filemngt.model.ZipFileDownloadUtil;
 import com.catchfile.filemngt.service.AttachmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,11 +16,11 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
 public class AttachmentController {
-
     private static final Logger logger = LoggerFactory.getLogger(AttachmentController.class);
     private final AttachmentService attachmentService;
 
@@ -29,58 +28,49 @@ public class AttachmentController {
         this.attachmentService = attachmentService;
     }
 
-    @PostMapping(value = "/upload", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping("/upload")
     public ResponseEntity<ResponseData> uploadFiles(@RequestParam("files") List<MultipartFile> files) {
         try {
             if (files == null || files.isEmpty()) {
-                return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+                return ResponseEntity.badRequest().build();
             }
+
             Attachment parentAttachment = attachmentService.saveAttachments(files);
-
-            List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
-                    .map(child -> {
-                        String downloadURL = "/download/" + child.getId();
-                        String deleteURL = "/delete/" + child.getId();
-                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, deleteURL, parentAttachment.getId());
-                    })
-                    .collect(Collectors.toList());
-
-            String bulkDownloadURL = "/download/bulk/" + parentAttachment.getId();
-
-            ResponseData responseData = new ResponseData(fileResponses, parentAttachment.getId(), bulkDownloadURL);
-            return new ResponseEntity<>(responseData, HttpStatus.CREATED);
+            ResponseData responseData = createResponseData(parentAttachment);
+            return ResponseEntity.status(HttpStatus.CREATED).body(responseData);
         } catch (Exception e) {
-            logger.error("Exception during file upload", e);
-            return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+            logger.error("Upload failed", e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 
-    @PostMapping(value = "/upload/{parent_id}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping("/upload/{parentId}")
     public ResponseEntity<ResponseData> uploadFilesToParent(
-            @PathVariable("parent_id") String parentId,
+            @PathVariable String parentId,
             @RequestParam("files") List<MultipartFile> files) {
         try {
             if (files == null || files.isEmpty()) {
-                return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+                return ResponseEntity.badRequest().build();
             }
 
             Attachment parentAttachment = attachmentService.addAttachmentsToParent(parentId, files);
-
-            List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
-                    .map(child -> {
-                        String downloadURL = "/download/" + child.getId();
-                        String deleteURL = "/delete/" + child.getId();
-                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, deleteURL, parentAttachment.getId());
-                    })
-                    .collect(Collectors.toList());
-
-            String bulkDownloadURL = "/download/bulk/" + parentAttachment.getId();
-
-            ResponseData responseData = new ResponseData(fileResponses, parentAttachment.getId(), bulkDownloadURL);
-            return new ResponseEntity<>(responseData, HttpStatus.CREATED);
+            ResponseData responseData = createResponseData(parentAttachment);
+            return ResponseEntity.status(HttpStatus.CREATED).body(responseData);
         } catch (Exception e) {
-            logger.error("Exception during file upload to parent", e);
-            return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+            logger.error("Upload to parent failed", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/delete/{fileId}")
+    public ResponseEntity<?> deleteFile(@PathVariable String fileId) {
+        try {
+            Map<String, Object> deleteResponse = attachmentService.deleteAttachment(fileId);
+            return ResponseEntity.ok(deleteResponse);
+        } catch (Exception e) {
+            logger.error("Deletion failed", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -88,38 +78,11 @@ public class AttachmentController {
     public ResponseEntity<?> downloadFile(@PathVariable String fileId) {
         try {
             Attachment attachment = attachmentService.getAttachment(fileId);
-            if (attachment == null || attachment.getData() == null) {
-                return ResponseEntity.notFound().build();
-            }
-            return getSingleFileResponse(attachment);
+            return createDownloadResponse(attachment);
         } catch (Exception e) {
-            logger.error("Error downloading file", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error downloading file: " + e.getMessage());
-        }
-    }
-
-    @GetMapping("/download/bulk/{parentId}")
-    public ResponseEntity<?> downloadBulkFiles(@PathVariable String parentId) {
-        try {
-            List<Attachment> attachments = attachmentService.getAttachmentsByParentId(parentId);
-            return ZipFileDownloadUtil.createZipFile(attachments, parentId);
-        } catch (Exception e) {
-            logger.error("Error downloading bulk files", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error downloading files: " + e.getMessage());
-        }
-    }
-
-    @DeleteMapping("/delete/{fileId}")
-    public ResponseEntity<?> deleteFile(@PathVariable String fileId) {
-        try {
-            attachmentService.deleteAttachment(fileId);
-            return ResponseEntity.ok("File and its dependencies have been deleted/updated.");
-        } catch (Exception e) {
-            logger.error("Error deleting file", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error deleting file: " + e.getMessage());
+            logger.error("Download failed", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -130,39 +93,57 @@ public class AttachmentController {
             if (attachments.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
-            List<ResponseData.FileResponse> fileResponses = attachments.stream()
-                    .map(child -> {
-                        String downloadURL = ServletUriComponentsBuilder.fromCurrentContextPath()
-                                .path("/download/")
-                                .path(child.getId())
-                                .toUriString();
-                        return new ResponseData.FileResponse(child.getFileName(), downloadURL, "", parentId);
-                    })
-                    .collect(Collectors.toList());
-            ResponseData responseData = new ResponseData(fileResponses, parentId, "");
+
+            ResponseData responseData = createResponseDataForChildren(attachments, parentId);
             return ResponseEntity.ok(responseData);
         } catch (Exception e) {
-            logger.error("Error retrieving files", e);
-            ResponseData errorResponse = new ResponseData(null, parentId, "");
-
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            logger.error("Retrieval failed", e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 
+    private ResponseData createResponseData(Attachment parentAttachment) {
+        List<ResponseData.FileResponse> fileResponses = parentAttachment.getChildren().stream()
+                .map(this::createFileResponse)
+                .collect(Collectors.toList());
 
-    private ResponseEntity<Resource> getSingleFileResponse(Attachment attachment) {
-        String fileType = attachment.getFileType();
-        if (fileType == null || fileType.isEmpty()) {
-            fileType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
-        }
-        try {
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(fileType))
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + attachment.getFileName() + "\"")
-                    .body(new ByteArrayResource(attachment.getData()));
-        } catch (Exception e) {
-            logger.error("Error creating byte array resource", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
+        return new ResponseData(
+                fileResponses,
+                parentAttachment.getId(),
+                "/download/bulk/" + parentAttachment.getId(),
+                attachmentService.getAttachmentCount(parentAttachment.getId())
+        );
+    }
+
+    private ResponseData createResponseDataForChildren(List<Attachment> attachments, String parentId) {
+        List<ResponseData.FileResponse> fileResponses = attachments.stream()
+                .map(this::createFileResponse)
+                .collect(Collectors.toList());
+
+        return new ResponseData(
+                fileResponses,
+                parentId,
+                "/download/bulk/" + parentId,
+                attachmentService.getAttachmentCount(parentId)
+        );
+    }
+
+    private ResponseData.FileResponse createFileResponse(Attachment attachment) {
+        String baseUrl = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
+        return new ResponseData.FileResponse(
+                attachment.getFileName(),
+                baseUrl + "/download/" + attachment.getId(),
+                baseUrl + "/delete/" + attachment.getId(),
+                attachment.getParent().getId()
+        );
+    }
+
+    private ResponseEntity<Resource> createDownloadResponse(Attachment attachment) {
+        ByteArrayResource resource = new ByteArrayResource(attachment.getData());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(attachment.getFileType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + attachment.getFileName() + "\"")
+                .body(resource);
     }
 }

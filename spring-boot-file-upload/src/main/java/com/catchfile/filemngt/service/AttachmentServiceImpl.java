@@ -7,74 +7,101 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.transaction.Transactional;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Random;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AttachmentServiceImpl implements AttachmentService {
-
     private final AttachmentRepository attachmentRepository;
+    private final Set<String> activeIds;
+    private final Map<String, Integer> attachmentCounts;
 
     public AttachmentServiceImpl(AttachmentRepository attachmentRepository) {
         this.attachmentRepository = attachmentRepository;
+        this.activeIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        this.attachmentCounts = new ConcurrentHashMap<>();
+
+        // Initialize with existing data
+        attachmentRepository.findAll().forEach(attachment -> {
+            activeIds.add(attachment.getId());
+            if (attachment.getParent() != null) {
+                attachmentCounts.merge(attachment.getParent().getId(), 1, Integer::sum);
+            }
+        });
     }
 
     @Override
+    @Transactional
     public Attachment saveAttachments(List<MultipartFile> files) throws Exception {
         String parentId = generateUniqueId();
         Attachment parentAttachment = new Attachment(parentId, "parent", null, null, null);
         List<Attachment> children = new ArrayList<>();
 
         for (MultipartFile file : files) {
-            String fileName = StringUtils.cleanPath(file.getOriginalFilename());
-            if (fileName.contains("..")) {
-                throw new Exception("Filename contains invalid path sequence " + fileName);
-            }
-            String childId = parentId + "_" + children.size();
-            Attachment childAttachment = new Attachment(
-                    childId,
-                    fileName,
-                    file.getContentType(),
-                    file.getBytes(),
-                    parentAttachment
-            );
+            validateFileName(file);
+            String childId = generateChildId(parentId, children.size());
+            Attachment childAttachment = createAttachment(childId, file, parentAttachment);
             children.add(childAttachment);
+            activeIds.add(childId);
         }
+
         parentAttachment.setChildren(children);
+        attachmentCounts.put(parentId, children.size());
+        activeIds.add(parentId);
+
         return attachmentRepository.save(parentAttachment);
     }
 
     @Override
     @Transactional
     public Attachment addAttachmentsToParent(String parentId, List<MultipartFile> files) throws Exception {
-        Attachment parentAttachment = attachmentRepository.findById(parentId)
-                .orElseThrow(() -> new Exception("Parent not found with Id: " + parentId));
-
+        Attachment parentAttachment = getAttachment(parentId);
         List<Attachment> existingChildren = parentAttachment.getChildren();
         int startIndex = existingChildren.size();
 
-        for (int i = 0; i < files.size(); i++) {
-            MultipartFile file = files.get(i);
-            String fileName = StringUtils.cleanPath(file.getOriginalFilename());
-            if (fileName.contains("..")) {
-                throw new Exception("Filename contains invalid path sequence " + fileName);
-            }
-
-            String childId = parentId + "_" + (startIndex + i);
-            Attachment childAttachment = new Attachment(
-                    childId,
-                    fileName,
-                    file.getContentType(),
-                    file.getBytes(),
-                    parentAttachment
-            );
+        for (MultipartFile file : files) {
+            validateFileName(file);
+            String childId = generateChildId(parentId, startIndex++);
+            Attachment childAttachment = createAttachment(childId, file, parentAttachment);
             existingChildren.add(childAttachment);
+            activeIds.add(childId);
         }
 
+        attachmentCounts.merge(parentId, files.size(), Integer::sum);
         parentAttachment.setChildren(existingChildren);
         return attachmentRepository.save(parentAttachment);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> deleteAttachment(String fileId) throws Exception {
+        Attachment attachment = getAttachment(fileId);
+        String parentId = attachment.getParent() != null ? attachment.getParent().getId() : null;
+
+        Map<String, Object> response = new HashMap<>();
+        if (parentId != null) {
+            int newCount = attachmentCounts.merge(parentId, -1, Integer::sum);
+            response.put("remainingCount", newCount);
+            response.put("parentId", parentId);
+
+            if (newCount <= 0) {
+                attachmentRepository.deleteById(parentId);
+                activeIds.remove(parentId);
+                attachmentCounts.remove(parentId);
+            } else {
+                response.put("remainingFiles", getRemainingFilesInfo(parentId));
+            }
+        }
+
+        activeIds.remove(fileId);
+        attachmentRepository.delete(attachment);
+        return response;
+    }
+
+    @Override
+    public Attachment getAttachment(String fileId) throws Exception {
+        return attachmentRepository.findById(fileId)
+                .orElseThrow(() -> new Exception("File not found: " + fileId));
     }
 
     @Override
@@ -83,33 +110,8 @@ public class AttachmentServiceImpl implements AttachmentService {
     }
 
     @Override
-    public Attachment getAttachment(String fileId) throws Exception {
-        return attachmentRepository.findById(fileId)
-                .orElseThrow(() -> new Exception("File not found with Id: " + fileId));
-    }
-
-    @Override
-    @Transactional
-    public void deleteAttachment(String fileId) throws Exception {
-        Optional<Attachment> attachmentOptional = attachmentRepository.findById(fileId);
-        if (attachmentOptional.isPresent()) {
-            Attachment attachment = attachmentOptional.get();
-            if (attachment.getParent() != null) {
-                List<Attachment> children = attachment.getChildren();
-                if (!children.isEmpty()) {
-                    Attachment newParent = children.get(0);
-                    newParent.setParent(null);
-                    newParent.setId(attachment.getId());
-                    children.remove(0);
-                    for (int i = 0; i < children.size(); i++) {
-                        children.get(i).setId(attachment.getId() + "_" + i);
-                    }
-                    newParent.setChildren(children);
-                    attachmentRepository.save(newParent);
-                }
-            }
-            attachmentRepository.delete(attachment);
-        }
+    public int getAttachmentCount(String parentId) {
+        return attachmentCounts.getOrDefault(parentId, 0);
     }
 
     private String generateUniqueId() {
@@ -117,7 +119,49 @@ public class AttachmentServiceImpl implements AttachmentService {
         String id;
         do {
             id = String.format("%04d", random.nextInt(10000));
-        } while (attachmentRepository.existsById(id));
+        } while (activeIds.contains(id) || attachmentRepository.existsById(id));
         return id;
+    }
+
+    private String generateChildId(String parentId, int index) {
+        String childId;
+        do {
+            childId = parentId + "_" + index;
+            index++;
+        } while (activeIds.contains(childId));
+        return childId;
+    }
+
+    private void validateFileName(MultipartFile file) throws Exception {
+        String fileName = StringUtils.cleanPath(file.getOriginalFilename());
+        if (fileName.contains("..")) {
+            throw new Exception("Invalid filename: " + fileName);
+        }
+    }
+
+    private Attachment createAttachment(String id, MultipartFile file, Attachment parent) throws Exception {
+        return new Attachment(
+                id,
+                StringUtils.cleanPath(file.getOriginalFilename()),
+                file.getContentType(),
+                file.getBytes(),
+                parent
+        );
+    }
+
+    private List<Map<String, String>> getRemainingFilesInfo(String parentId) throws Exception {
+        List<Map<String, String>> remainingFiles = new ArrayList<>();
+        List<Attachment> attachments = getAttachmentsByParentId(parentId);
+
+        for (Attachment attachment : attachments) {
+            Map<String, String> fileInfo = new HashMap<>();
+            fileInfo.put("fileId", attachment.getId());
+            fileInfo.put("fileName", attachment.getFileName());
+            fileInfo.put("downloadUrl", "/download/" + attachment.getId());
+            fileInfo.put("deleteUrl", "/delete/" + attachment.getId());
+            remainingFiles.add(fileInfo);
+        }
+
+        return remainingFiles;
     }
 }
